@@ -2,6 +2,7 @@ import numpy as np
 from director import vtkAll as vtk
 from director.debugVis import DebugData
 from director import ioUtils, filterUtils
+import math
 
 class MovingObject(object):
 
@@ -116,7 +117,7 @@ class MovingObject(object):
         Returns:
             New state.
         """
-        return self._state + self._dynamics(self._state, action, dt)
+        return self._state + self._dynamics(self._state, dt, action)
 
     def move(self, action, dt=1.0/30.0):
         """Moves the object by a given time step.
@@ -173,10 +174,10 @@ class Robot(MovingObject):
         self._exploration = exploration
         t = vtk.vtkTransform()
         t.Scale(scale, scale, scale)
+        t.RotateZ(90)
         polydata = ioUtils.readPolyData(model)
         polydata = filterUtils.transformPolyData(polydata, t)
         super(Robot, self).__init__(velocity, polydata)
-        self._ctrl = Controller()
 
     def move(self, action, dt=1.0/30.0):
         """Moves the object by a given time step.
@@ -185,6 +186,7 @@ class Robot(MovingObject):
             dt: Length of time step.
         """
 
+        prev_xy = self._state[0], self._state[1]
         super(Robot, self).move(action, dt)
 
         if self._sensors[0].has_collided() or self.at_target():
@@ -192,7 +194,7 @@ class Robot(MovingObject):
         else:
             done = False
 
-        prev_xy = self._state[0], self._state[1]
+
         return self._get_state(), self._get_reward(prev_xy), done
 
         # gamma = 0.9
@@ -220,9 +222,6 @@ class Robot(MovingObject):
 
     def set_target(self, target):
         self._target = target
-
-    def set_controller(self, ctrl):
-        self._ctrl = ctrl
 
     def at_target(self, threshold=3):
         """Return whether the robot has reached its target.

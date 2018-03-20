@@ -22,14 +22,14 @@ class CarObstacleEnv(object):
         """Constructs the simulator.
         """
 
+        self._app = ConsoleApp()
+        self._view = self._app.createView(useGrid=False)
+
         self.create_world()
         self.create_obstacles()
         self.create_target()
         self.create_robot()
         self.update_locator()
-
-        self._app = ConsoleApp()
-        self._view = self._app.createView(useGrid=False)
 
         self._timestep = 0
         self._horizon = horizon
@@ -39,11 +39,16 @@ class CarObstacleEnv(object):
         self._num_crashes = 0
         self._run_ticks = 0
 
-
-
     def run(self):
+        widget = QtGui.QWidget()
+        layout = QtGui.QVBoxLayout(widget)
+        layout.addWidget(self._view)
+        widget.showMaximized()
+
+        # Set camera.
+        applogic.resetCamera(viewDirection=[0.2, 0, -1])
         self._timer = TimerCallback(targetFps=120)
-        self._timer.callback = self.step
+        self._timer.callback = self.tick
         self._timer.start()
 
         self._app.start()
@@ -61,7 +66,11 @@ class CarObstacleEnv(object):
 
     def tick(self):
         action = np.random.choice([-np.pi / 2, 0., np.pi / 2], 1)[0]
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if done:
+            obs = self.reset()
+
+        print obs
 
     def step(self, action):
         info = None
@@ -75,6 +84,9 @@ class CarObstacleEnv(object):
 
         # actions = [-np.pi / 2, 0., np.pi / 2]
         obs, reward, done = robot.move(action)
+        for sensor in robot.sensors:
+            frame_name = "rays"
+            self._update_sensor(sensor, frame_name)
 
         # if self._timestep >= self._horizon:
         #     done = True
@@ -144,7 +156,7 @@ class CarObstacleEnv(object):
 
         self.init_robot_position(robot)
 
-        # color = [0.4, 0.85098039, 0.9372549]
+        color = [0.4, 0.85098039, 0.9372549]
         frame_name = "robot"
         frame = self._add_polydata(robot.to_polydata(), frame_name, color)
         self._robot = (robot, frame)
@@ -197,78 +209,6 @@ class CarObstacleEnv(object):
         self.locator = vtk.vtkCellLocator()
         self.locator.SetDataSet(d.getPolyData())
         self.locator.BuildLocator()
-
-    def run(self, display):
-        """Launches and displays the simulator.
-
-        Args:
-            display: Displays the simulator or not.
-        """
-        if display:
-            widget = QtGui.QWidget()
-            layout = QtGui.QVBoxLayout(widget)
-            layout.addWidget(self._view)
-            widget.showMaximized()
-
-            # Set camera.
-            applogic.resetCamera(viewDirection=[0.2, 0, -1])
-
-        # Set timer.
-        self._tick_count = 0
-        self._timer = TimerCallback(targetFps=120)
-        self._timer.callback = self.tick
-        self._timer.start()
-
-        self._app.start()
-
-    def tick(self):
-        """Update simulation clock."""
-        self._tick_count += 1
-        self._run_ticks += 1
-        if self._tick_count >= 500:
-            print("timeout")
-            for robot, frame in self._robots:
-                self.reset(robot, frame)
-
-        need_update = False
-        for obstacle, frame in self._obstacles:
-            if obstacle.velocity != 0.:
-                obstacle.move()
-                self._update_object_pose(obstacle, frame)
-                need_update = True
-
-        if need_update:
-            self.update_locator()
-
-        for i, (robot, frame) in enumerate(self._robots):
-            self._update_object_pose(robot, frame)
-            for sensor in robot.sensors:
-                sensor.set_locator(self.locator)
-            robot.move()
-            for sensor in robot.sensors:
-                frame_name = "rays{}".format(i)
-                self._update_sensor(sensor, frame_name)
-                if sensor.has_collided():
-                    self._num_crashes += 1
-                    print("collided", min(d for d in sensor._distances if d > 0))
-                    print("targets hit", self._num_targets)
-                    print("ticks lived", self._run_ticks)
-                    print("deaths", self._num_crashes)
-                    self._run_ticks = 0
-                    self._num_targets = 0
-                    new_target = self.generate_random_position()
-                    for robot, frame in self._robots:
-                        robot.set_target(new_target)
-                    self.add_target(new_target)
-                    self.reset(robot, frame)
-
-            if robot.at_target():
-                self._num_targets += 1
-                self._tick_count = 0
-                new_target = self.generate_random_position()
-                for robot, frame in self._robots:
-                    robot.set_target(new_target)
-                self.add_target(new_target)
 
     def generate_random_position(self):
         return tuple(np.random.uniform(-75, 75, 2))
