@@ -19,7 +19,7 @@ class MovingObject(object):
         self._velocity = float(velocity)
         self._raw_polydata = polydata
         self._polydata = polydata
-        self._sensors = []
+        self._sensor = None
 
     @property
     def x(self):
@@ -68,9 +68,9 @@ class MovingObject(object):
         self._velocity = float(value)
 
     @property
-    def sensors(self):
+    def sensor(self):
         """List of attached sensors."""
-        return self._sensors
+        return self._sensor
 
     def attach_sensor(self, sensor):
         """Attaches a sensor.
@@ -78,9 +78,25 @@ class MovingObject(object):
         Args:
             sensor: Sensor.
         """
-        self._sensors.append(sensor)
+        self._sensor = sensor
 
-    def _dynamics(self, state, t, action, controller=None):
+    # def _dynamics(self, state, t, action, controller=None):
+    #     """Dynamics of the object.
+
+    #     Args:
+    #         state: Initial condition.
+    #         t: Time.
+
+    #     Returns:
+    #         Derivative of state at t.
+    #     """
+    #     dqdt = np.zeros_like(state)
+    #     dqdt[0] = self._velocity * np.cos(state[2])
+    #     dqdt[1] = self._velocity * np.sin(state[2])
+    #     dqdt[2] = self._control(state, t, action)
+    #     return dqdt * t
+
+    def _dynamics(self, state, action):
         """Dynamics of the object.
 
         Args:
@@ -93,8 +109,15 @@ class MovingObject(object):
         dqdt = np.zeros_like(state)
         dqdt[0] = self._velocity * np.cos(state[2])
         dqdt[1] = self._velocity * np.sin(state[2])
-        dqdt[2] = self._control(state, t, action)
-        return dqdt * t
+        dqdt[2] = action
+        # if action == 0:
+        #     dqdt[0] = self._velocity * np.cos(state[2])
+        #     dqdt[1] = self._velocity * np.sin(state[2])
+        # else:
+        #     dqdt[0] = 0
+        #     dqdt[1] = 0
+        # dqdt[2] = action
+        return dqdt / 30.0
 
     def _control(self, state, t, action):
         """Returns the yaw given state.
@@ -108,7 +131,7 @@ class MovingObject(object):
         """
         raise NotImplementedError
 
-    def _simulate(self, action, dt):
+    def _simulate(self, action):
         """Simulates the object moving.
 
         Args:
@@ -117,15 +140,15 @@ class MovingObject(object):
         Returns:
             New state.
         """
-        return self._state + self._dynamics(self._state, dt, action)
+        return self._state + self._dynamics(self._state, action)
 
-    def move(self, action, dt=1.0/30.0):
+    def move(self, action):
         """Moves the object by a given time step.
 
         Args:
             dt: Length of time step.
         """
-        state = self._simulate(action, dt)
+        state = self._simulate(action)
         self._update_state(state)
 
     def _update_state(self, next_state):
@@ -139,7 +162,8 @@ class MovingObject(object):
         t.RotateZ(np.degrees(next_state[2]))
         self._polydata = filterUtils.transformPolyData(self._raw_polydata, t)
         self._state = next_state
-        list(map(lambda s: s.update(*self._state), self._sensors))
+        if self._sensor is not None:
+            self._sensor.update(*self._state)
 
     def to_positioned_polydata(self):
         """Converts object to visualizable poly data.
@@ -160,78 +184,35 @@ class Robot(MovingObject):
 
     """Robot."""
 
-    def __init__(self, velocity=25.0, scale=0.15, exploration=0.5,
-                 model="car.obj"):
-        """Constructs a Robot.
-
-        Args:
-            velocity: Velocity of the robot in the forward direction.
-            scale: Scale of the model.
-            exploration: Exploration rate.
-            model: Object model to use.
-        """
+    def __init__(self, velocity=25.0, scale=0.15):
         self._target = (0, 0)
-        self._exploration = exploration
-        t = vtk.vtkTransform()
-        t.Scale(scale, scale, scale)
-        t.RotateZ(90)
-        polydata = ioUtils.readPolyData(model)
-        polydata = filterUtils.transformPolyData(polydata, t)
+
+        data = DebugData()
+        center = [0, 0, 0]
+        axis = [0, 0, 1]
+        height = 0.1
+        radius = 2
+        data.addCylinder(center, axis, height, radius)
+        polydata = data.getPolyData()
         super(Robot, self).__init__(velocity, polydata)
 
-    def move(self, action, dt=1.0/30.0):
-        """Moves the object by a given time step.
-
-        Args:
-            dt: Length of time step.
-        """
-
+    def move(self, action):
         prev_xy = self._state[0], self._state[1]
-        super(Robot, self).move(action, dt)
+        super(Robot, self).move(action)
 
-        if self._sensors[0].has_collided() or self.at_target():
+        if self._sensor.has_collided() or self.at_target():
+        # if self._sensor.has_collided():
             done = True
         else:
             done = False
 
+        return self._get_state(), self._get_reward(prev_xy), done, prev_xy
 
-        return self._get_state(), self._get_reward(prev_xy), done
-
-        # gamma = 0.9
-        # prev_xy = self._state[0], self._state[1]
-        # prev_state = self._get_state()
-        # prev_utilities = self._ctrl.evaluate(prev_state)
-        # super(Robot, self).move(dt)
-        # next_state = self._get_state()
-        # next_utilities = self._ctrl.evaluate(next_state)
-        # print("action: {}, utility: {}".format(
-        #     self._selected_i, prev_utilities[self._selected_i]))
-        #
-        # terminal = self._sensors[0].has_collided()
-        # curr_reward = self._get_reward(prev_xy)
-        # total_reward =\
-        #     curr_reward if terminal else \
-        #     curr_reward + gamma * next_utilities[self._selected_i]
-        # rewards = [total_reward if i == self._selected_i else prev_utilities[i]
-        #            for i in range(len(next_utilities))]
-        # print("-----------------------------")
-        # print(prev_state)
-        # print(rewards)
-        # print("-----------------------------")
-        # self._ctrl.train(prev_state, rewards)
 
     def set_target(self, target):
         self._target = target
 
     def at_target(self, threshold=3):
-        """Return whether the robot has reached its target.
-
-        Args:
-            threshold: Target distance threshold.
-
-        Returns:
-            True if target is reached.
-        """
         return (abs(self._state[0] - self._target[0]) <= threshold and
                 abs(self._state[1] - self._target[1]) <= threshold)
 
@@ -242,15 +223,27 @@ class Robot(MovingObject):
         new_dx = self._target[0] - self._state[0]
         new_dy = self._target[1] - self._state[1]
         new_distance = np.sqrt(new_dx ** 2 + new_dy ** 2)
-        if self._sensors[0].has_collided():
+        if self._sensor.has_collided():
             return -20
         elif self.at_target():
             return 15
         else:
             delta_distance = prev_distance - new_distance
             angle_distance = -abs(self._angle_to_destination()) / 4
-            obstacle_ahead = self._sensors[0].distances[8] - 1
+            obstacle_ahead = self._sensor.distances[8] - 1
             return delta_distance + angle_distance + obstacle_ahead
+
+        # if self._sensor.has_collided():
+        #     return -1000
+        # elif self.at_target():
+        #     return 1000
+        # else:
+        #     return -1
+
+        # if self._sensor.has_collided():
+        #     return 0
+        # else:
+        #     return 1
 
     def _angle_to_destination(self):
         x, y = self._target[0] - self.x, self._target[1] - self.y
@@ -262,30 +255,13 @@ class Robot(MovingObject):
     def _get_state(self):
         dx, dy = self._target[0] - self.x, self._target[1] - self.y
         curr_state = [dx / 1000, dy / 1000, self._angle_to_destination()]
-        return np.hstack([curr_state, self._sensors[0].distances])
+        return np.hstack([curr_state, self._sensor.distances])
+
+    def get_pos(self):
+        return self._state[:2]
 
     def _control(self, state, t, action):
-        """Returns the yaw given state.
-
-        Args:
-            state: State.
-            t: Time.
-
-        Returns:
-            Yaw.
-        """
-
-        choose_action = action
-        #
-        # utilities = self._ctrl.evaluate(self._get_state())
-        # optimal_i = np.argmax(utilities)
-        # if np.random.random() <= self._exploration:
-        #     optimal_i = np.random.choice([0, 1, 2])
-        #
-        # optimal_a = actions[optimal_i]
-        # self._selected_i = optimal_i
-        return choose_action
-
+        return action
 
 class Obstacle(MovingObject):
 
@@ -335,7 +311,7 @@ class RaySensor(object):
 
     """Ray sensor."""
 
-    def __init__(self, num_rays=16, radius=40, min_angle=-45, max_angle=45):
+    def __init__(self, num_rays=10, radius=40, min_angle=-45, max_angle=45):
         """Constructs a RaySensor.
 
         Args:
@@ -521,7 +497,7 @@ class World(object):
 
         bounds = self._x_min, self._x_max, self._y_min, self._y_max
         while obstacle_area > 0:
-            radius = np.random.uniform(1.0, 3.0)
+            radius = np.random.uniform(3.0, 5.0)
             center_x_range = (self._x_min + radius, self._x_max - radius)
             center_y_range = (self._y_min + radius, self._y_max - radius)
             center_x = np.random.uniform(*center_x_range)

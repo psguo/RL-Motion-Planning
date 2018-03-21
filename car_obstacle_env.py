@@ -10,18 +10,19 @@ from director.debugVis import DebugData
 from director import visualization as vis
 from director.consoleapp import ConsoleApp
 from director.timercallback import TimerCallback
-
-
+from dueling import DuelingAgent
 from objects import World, RaySensor, Robot, Obstacle
+import time
 
 class CarObstacleEnv(object):
 
     """CarObstacleEnv."""
 
-    def __init__(self, horizon=2000):
+    def __init__(self, horizon=2000, render=False):
         """Constructs the simulator.
         """
 
+        # np.random.seed(2)
         self._app = ConsoleApp()
         self._view = self._app.createView(useGrid=False)
 
@@ -31,6 +32,8 @@ class CarObstacleEnv(object):
         self.create_robot()
         self.update_locator()
 
+        self._path_data = DebugData()
+
         self._timestep = 0
         self._horizon = horizon
 
@@ -38,14 +41,20 @@ class CarObstacleEnv(object):
         self._num_targets = 0
         self._num_crashes = 0
         self._run_ticks = 0
+        self._render = render
+        self.actions = [-np.pi / 2, 0., np.pi / 2]
 
-    def run(self):
+        # init agent
+        self._agent = DuelingAgent(n_actions=3, n_features=13,
+            lr=0.001, gamma=0.95, e_start=0.5, e_end=0.05, 
+            e_decay=5e-6, replace_iter=200, memory_size=50000, batch_size=32)
+
+    def _activate_rendering(self):
         widget = QtGui.QWidget()
         layout = QtGui.QVBoxLayout(widget)
         layout.addWidget(self._view)
         widget.showMaximized()
 
-        # Set camera.
         applogic.resetCamera(viewDirection=[0.2, 0, -1])
         self._timer = TimerCallback(targetFps=120)
         self._timer.callback = self.tick
@@ -53,40 +62,68 @@ class CarObstacleEnv(object):
 
         self._app.start()
 
-        # for i_episode in range(20):
-        #     observation = env.reset()
-        #     for t in range(100):
-        #         env.render()
-        #         print(observation)
-        #         action = np.random.choice([-np.pi / 2, 0., np.pi / 2], 1)[0]
-        #         observation, reward, done, info = env.step(action)
-        #         if done:
-        #             print("Episode finished after {} timesteps".format(t + 1))
-        #             break
+    def run(self):
+        # reset env
+        self._obs = self.reset()
+        self._eps_reward = 0
+        self._eps_iter = 0
+        self._running_reward =0
+        self._i_eps = 1
+
+        if self._render:
+            self._activate_rendering()
+        else:
+            # self.last_time = time.time()
+            while True:
+                self.tick()
+                if self._i_eps > 200:
+                    self._render = True
+                    self._activate_rendering()
+            
+
 
     def tick(self):
-        action = np.random.choice([-np.pi / 2, 0., np.pi / 2], 1)[0]
-        obs, reward, done, info = self.step(action)
+        # cur_time = time.time()
+        # print 1000*(cur_time - self.last_time)
+        # self.last_time = cur_time
+        action = self._agent.epsilon_greedy_policy(self._obs)
+        obs_, reward, done, curxy, prevxy = self.step(action)
+        if self._render:
+            self.update_path(curxy, prevxy)
+        self._eps_reward += reward
+        self._eps_iter += 1
+        # print('----------------------')
+        # print(self._obs, action, reward, obs_, done)
+        self._agent.train(self._obs, action, reward, obs_, done)
+        self._obs = obs_
         if done:
-            obs = self.reset()
-
-        print obs
+            self._obs = self.reset()
+            self._running_reward = self._running_reward*0.95 + 0.05*self._eps_reward
+            print '----------------'
+            print 'Episode: ', self._i_eps
+            print 'Survive: ', self._eps_iter
+            print 'Running reward: ', self._running_reward
+            print 'Episode reward: ',self._eps_reward
+            print 'Epsilon: ', self._agent.epsilon
+            self._i_eps += 1
+            self._eps_iter = 0
+            self._eps_reward = 0
+            if self._render:
+                self.clear_path()
 
     def step(self, action):
-        info = None
-
         self.update_obstacle()
 
         robot, frame = self._robot
 
-        for sensor in robot.sensors:
-            sensor.set_locator(self.locator)
+        robot.sensor.set_locator(self.locator)
 
-        # actions = [-np.pi / 2, 0., np.pi / 2]
-        obs, reward, done = robot.move(action)
-        for sensor in robot.sensors:
-            frame_name = "rays"
-            self._update_sensor(sensor, frame_name)
+        obs, reward, done, prevxy = robot.move(self.actions[action])
+        # print reward
+        # ttt = time.time()
+        if self._render:
+            self._update_sensor(robot.sensor, "rays")
+        # print 1000*(time.time()-ttt)
 
         # if self._timestep >= self._horizon:
         #     done = True
@@ -94,7 +131,7 @@ class CarObstacleEnv(object):
         self._update_object_pose(robot, frame)
 
         self._timestep += 1
-        return obs, reward, done, info
+        return obs, reward, done, robot.get_pos(), prevxy
 
     def reset(self):
         self._timestep = 0
@@ -135,6 +172,18 @@ class CarObstacleEnv(object):
         om.removeFromObjectModel(om.findObjectByName("world"))
         vis.showPolyData(self._world.to_polydata(), "world")
 
+    def update_path(self, curxy, prevxy):
+        start = list(prevxy) + [0]
+        end = list(curxy) + [0]
+        color = [1, 1, 0]
+        self._path_data.addLine(start, end, radius=0.1)
+        vis.updatePolyData(self._path_data.getPolyData(), "path", 
+                           color=color)
+
+    def clear_path(self):
+        om.removeFromObjectModel(om.findObjectByName("path"))
+        self._path_data = DebugData()
+
     def create_target(self):
         self._target_pos = self.generate_random_position()
         data = DebugData()
@@ -164,7 +213,7 @@ class CarObstacleEnv(object):
 
     def create_obstacles(self):
         self._obstacles = []
-        for obstacle in self._world.generate_obstacles(0.01, 0):
+        for obstacle in self._world.generate_obstacles(0.04, 0):
             """Adds an obstacle to the simulation.
     
             Args:
@@ -217,7 +266,7 @@ class CarObstacleEnv(object):
         while True:
             robot.x, robot.y = self.generate_random_position()
             robot.theta = np.random.uniform(0, 2 * np.pi)
-            if min(robot.sensors[0].distances) >= 0.30:
+            if min(robot.sensor.distances) >= 0.30:
                 return
 
     def reset_robot(self):
@@ -225,7 +274,6 @@ class CarObstacleEnv(object):
         self._tick_count = 0
         self.init_robot_position(self._robot[0])
         self._update_object_pose(self._robot[0], self._robot[1])
-        # self._robot[0]._ctrl.save()
 
     def update_obstacle(self):
         for obstacle, frame in self._obstacles:
