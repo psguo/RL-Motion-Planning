@@ -1,6 +1,5 @@
 import tensorflow as tf
 import numpy as np
-import gym
 import sys
 import argparse
 import matplotlib.pyplot as plt
@@ -17,6 +16,7 @@ class DuelingNetwork(object):
         self.train_iter_counter = 0
         self.n_features = n_features
         self.n_actions = n_actions
+
 
         # build net
         self.s = tf.placeholder(tf.float32, [None, n_features], name='s')
@@ -65,6 +65,8 @@ class DuelingNetwork(object):
 
         self.sess.run(tf.global_variables_initializer())
 
+        self.saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_net_cur'))
+
     def replace_old_net(self):
         # update old network
         self.sess.run(self.replace_op)
@@ -87,6 +89,10 @@ class DuelingNetwork(object):
 
     def predict(self, observations):
         return self.sess.run(self.q_cur, feed_dict={self.s: observations})
+
+    def save_model(self):
+        save_path = self.saver.save(self.sess, "/home/ps/Dropbox/Project/RL-Motion-Planning/duelling.ckpt")
+        print("Model saved in path: %s" % save_path)
 
 class Replay_Memory(object):
 
@@ -167,6 +173,9 @@ class DuelingAgent(object):
 
         if self.epsilon > self.e_end:
             self.epsilon -= self.e_decay
+
+    def save_param(self):
+        self.network.save_model()
 
     # def train(self):
     #     if self.burn_in > 0:

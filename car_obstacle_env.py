@@ -13,16 +13,18 @@ from director.timercallback import TimerCallback
 from dueling import DuelingAgent
 from objects import World, RaySensor, Robot, Obstacle
 import time
+from plot import Plot
 
 class CarObstacleEnv(object):
 
     """CarObstacleEnv."""
 
-    def __init__(self, horizon=2000, render=False):
+    def __init__(self, horizon=2000, render=False, start_render=200, test_interval=50):
         """Constructs the simulator.
         """
 
         # np.random.seed(2)
+        self.start_render = start_render
         self._app = ConsoleApp()
         self._view = self._app.createView(useGrid=False)
 
@@ -42,12 +44,26 @@ class CarObstacleEnv(object):
         self._num_crashes = 0
         self._run_ticks = 0
         self._render = render
-        self.actions = [-np.pi / 2, 0., np.pi / 2]
+        # self.actions = [-np.pi / 2, np.pi / 2]
+        self.actions = np.linspace(0, 2 * np.pi, num=10, endpoint=False)
 
         # init agent
-        self._agent = DuelingAgent(n_actions=3, n_features=13,
+        self._agent = DuelingAgent(n_actions=len(self.actions), n_features=13,
             lr=0.001, gamma=0.95, e_start=0.5, e_end=0.05, 
             e_decay=5e-6, replace_iter=200, memory_size=50000, batch_size=32)
+
+        self.rewards = []
+        self.plot = Plot(env_name='Car Obstacle')
+        self.test_interval = test_interval
+        self.test_count = 0
+        self.is_test = False
+        self.success_test = 0
+        self.test_results = []
+        self.test_epss = []
+        self.test_total_count = 100
+
+        self.test_step = 0
+        self.max_horizon = 1000
 
     def _activate_rendering(self):
         widget = QtGui.QWidget()
@@ -76,40 +92,82 @@ class CarObstacleEnv(object):
             # self.last_time = time.time()
             while True:
                 self.tick()
-                if self._i_eps > 200:
+
+                if self._i_eps % self.test_interval == 0:
+                    self.is_test = True
+
+                if self._i_eps > self.start_render:
+                    np.asarray(self.rewards).dump("rewards.dat")
+                    self._agent.save_param()
+                    self.plot.plot_success(eps=self.test_epss, success=self.test_results, normalization=self.test_total_count)
                     self._render = True
                     self._activate_rendering()
-            
-
 
     def tick(self):
-        # cur_time = time.time()
-        # print 1000*(cur_time - self.last_time)
-        # self.last_time = cur_time
-        action = self._agent.epsilon_greedy_policy(self._obs)
-        obs_, reward, done, curxy, prevxy = self.step(action)
-        if self._render:
-            self.update_path(curxy, prevxy)
-        self._eps_reward += reward
-        self._eps_iter += 1
-        # print('----------------------')
-        # print(self._obs, action, reward, obs_, done)
-        self._agent.train(self._obs, action, reward, obs_, done)
-        self._obs = obs_
-        if done:
-            self._obs = self.reset()
-            self._running_reward = self._running_reward*0.95 + 0.05*self._eps_reward
-            print '----------------'
-            print 'Episode: ', self._i_eps
-            print 'Survive: ', self._eps_iter
-            print 'Running reward: ', self._running_reward
-            print 'Episode reward: ',self._eps_reward
-            print 'Epsilon: ', self._agent.epsilon
-            self._i_eps += 1
-            self._eps_iter = 0
-            self._eps_reward = 0
+        if self.is_test:
+            action = self._agent.greedy_policy(self._obs)
+            obs_, reward, done, curxy, prevxy = self.step(action)
             if self._render:
-                self.clear_path()
+                self.update_path(curxy, prevxy)
+            self._obs = obs_
+
+            if self.test_step >= self.max_horizon:
+                done = True
+                self.test_step = 0
+
+            if done:
+                if reward == 15:
+                    self.success_test += 1
+                self._obs = self.reset()
+                self.test_count += 1
+                self._eps_iter = 0
+                if self._render:
+                    self.clear_path()
+
+                if self.test_count % int(self.test_total_count/5) == 0:
+                    print "Test progress: ", self.test_count, '/', self.test_total_count
+
+
+                if self.test_count == self.test_total_count:
+                    self._i_eps += 1
+                    self.test_count = 0
+                    self.is_test = False
+                    self.success_test = 0
+                    self.test_results.append(self.success_test / self.test_total_count)
+                    self.test_epss.append(self._i_eps)
+
+                    print 'Test Result: ', self.success_test, '/', self.test_total_count
+            self.test_step += 1
+
+        else:
+            # cur_time = time.time()
+            # print 1000*(cur_time - self.last_time)
+            # self.last_time = cur_time
+            action = self._agent.epsilon_greedy_policy(self._obs)
+            obs_, reward, done, curxy, prevxy = self.step(action)
+            if self._render:
+                self.update_path(curxy, prevxy)
+            self._eps_reward += reward
+            self._eps_iter += 1
+            # print('----------------------')
+            # print(self._obs, action, reward, obs_, done)
+            self._agent.train(self._obs, action, reward, obs_, done)
+            self._obs = obs_
+            if done:
+                self._obs = self.reset()
+                self._running_reward = self._running_reward*0.95 + 0.05*self._eps_reward
+                self.rewards.append(self._eps_reward)
+                print '----------------'
+                print 'Episode: ', self._i_eps
+                print 'Survive: ', self._eps_iter
+                print 'Running reward: ', self._running_reward
+                print 'Episode reward: ',self._eps_reward
+                print 'Epsilon: ', self._agent.epsilon
+                self._i_eps += 1
+                self._eps_iter = 0
+                self._eps_reward = 0
+                if self._render:
+                    self.clear_path()
 
     def step(self, action):
         self.update_obstacle()
@@ -135,8 +193,10 @@ class CarObstacleEnv(object):
 
     def reset(self):
         self._timestep = 0
+        self.reset_obstacles()
         self.create_target()
         self.reset_robot()
+        self.update_locator()
         return self._robot[0]._get_state()
 
     def render(self, mode='human'):
@@ -224,6 +284,11 @@ class CarObstacleEnv(object):
             frame = self._add_polydata(obstacle.to_polydata(), frame_name, color)
             self._obstacles.append((obstacle, frame))
             self._update_object_pose(obstacle, frame)
+
+    def reset_obstacles(self):
+        for obstacle,frame in self._obstacles:
+            om.removeFromObjectModel(om.findObjectByName(frame))
+        self.create_obstacles()
 
     def _update_object_pose(self, moving_object, frame):
         """Updates moving object's state.

@@ -107,9 +107,9 @@ class MovingObject(object):
             Derivative of state at t.
         """
         dqdt = np.zeros_like(state)
-        dqdt[0] = self._velocity * np.cos(state[2])
-        dqdt[1] = self._velocity * np.sin(state[2])
-        dqdt[2] = action
+        dqdt[0] = self._velocity * np.cos(action)
+        dqdt[1] = self._velocity * np.sin(action)
+        # dqdt[2] = action
         # if action == 0:
         #     dqdt[0] = self._velocity * np.cos(state[2])
         #     dqdt[1] = self._velocity * np.sin(state[2])
@@ -140,6 +140,11 @@ class MovingObject(object):
         Returns:
             New state.
         """
+        self._state[2] = action
+        self._state = self._state + self._dynamics(self._state, action)
+
+        return self._state
+
         return self._state + self._dynamics(self._state, action)
 
     def move(self, action):
@@ -224,14 +229,15 @@ class Robot(MovingObject):
         new_dy = self._target[1] - self._state[1]
         new_distance = np.sqrt(new_dx ** 2 + new_dy ** 2)
         if self._sensor.has_collided():
-            return -20
+            return -40
         elif self.at_target():
             return 15
         else:
             delta_distance = prev_distance - new_distance
-            angle_distance = -abs(self._angle_to_destination()) / 4
-            obstacle_ahead = self._sensor.distances[8] - 1
-            return delta_distance + angle_distance + obstacle_ahead
+            # angle_distance = -abs(self._angle_to_destination()) / 4
+            # obstacle_ahead = self._sensor.distances[8] - 1
+            # delta_distance = -new_distance
+            return delta_distance
 
         # if self._sensor.has_collided():
         #     return -1000
