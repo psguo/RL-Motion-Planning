@@ -3,6 +3,8 @@ class Plot():
         self.env_name = env_name
 
     def plot_success(self, eps, success, normalization):
+        print eps
+        print success
     # def plot_reward(self, rewards):
         import numpy as np
         import matplotlib.pyplot as plt
@@ -12,7 +14,7 @@ class Plot():
 
         plt.title(self.env_name)
         plt.xlabel('number of episode')
-        plt.ylabel('reward')
+        plt.ylabel('success rate')
 
         plt.plot(x, y, linewidth=2.0)
         plt.show()

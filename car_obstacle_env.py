@@ -48,7 +48,7 @@ class CarObstacleEnv(object):
         self.actions = np.linspace(0, 2 * np.pi, num=10, endpoint=False)
 
         # init agent
-        self._agent = DuelingAgent(n_actions=len(self.actions), n_features=13,
+        self._agent = DuelingAgent(n_actions=len(self.actions), n_features=30+3,
             lr=0.001, gamma=0.95, e_start=0.5, e_end=0.05, 
             e_decay=5e-6, replace_iter=200, memory_size=50000, batch_size=32)
 
@@ -106,7 +106,8 @@ class CarObstacleEnv(object):
     def tick(self):
         if self.is_test:
             action = self._agent.greedy_policy(self._obs)
-            obs_, reward, done, curxy, prevxy = self.step(action)
+            obs_, reward, done, curxy, info = self.step(action)
+            prevxy = info['prevxy']
             if self._render:
                 self.update_path(curxy, prevxy)
             self._obs = obs_
@@ -116,7 +117,7 @@ class CarObstacleEnv(object):
                 self.test_step = 0
 
             if done:
-                if reward == 15:
+                if info["is_at_target"]:
                     self.success_test += 1
                 self._obs = self.reset()
                 self.test_count += 1
@@ -127,16 +128,16 @@ class CarObstacleEnv(object):
                 if self.test_count % int(self.test_total_count/5) == 0:
                     print "Test progress: ", self.test_count, '/', self.test_total_count
 
-
                 if self.test_count == self.test_total_count:
                     self._i_eps += 1
                     self.test_count = 0
                     self.is_test = False
-                    self.success_test = 0
-                    self.test_results.append(self.success_test / self.test_total_count)
+                    self.test_results.append(float(self.success_test) / self.test_total_count)
                     self.test_epss.append(self._i_eps)
-
                     print 'Test Result: ', self.success_test, '/', self.test_total_count
+                    print self.test_results
+                    self.success_test = 0
+
             self.test_step += 1
 
         else:
@@ -144,7 +145,8 @@ class CarObstacleEnv(object):
             # print 1000*(cur_time - self.last_time)
             # self.last_time = cur_time
             action = self._agent.epsilon_greedy_policy(self._obs)
-            obs_, reward, done, curxy, prevxy = self.step(action)
+            obs_, reward, done, curxy, info = self.step(action)
+            prevxy = info['prevxy']
             if self._render:
                 self.update_path(curxy, prevxy)
             self._eps_reward += reward
@@ -176,7 +178,7 @@ class CarObstacleEnv(object):
 
         robot.sensor.set_locator(self.locator)
 
-        obs, reward, done, prevxy = robot.move(self.actions[action])
+        obs, reward, done, info = robot.move(self.actions[action])
         # print reward
         # ttt = time.time()
         if self._render:
@@ -189,7 +191,7 @@ class CarObstacleEnv(object):
         self._update_object_pose(robot, frame)
 
         self._timestep += 1
-        return obs, reward, done, robot.get_pos(), prevxy
+        return obs, reward, done, robot.get_pos(), info
 
     def reset(self):
         self._timestep = 0
@@ -237,7 +239,7 @@ class CarObstacleEnv(object):
         end = list(curxy) + [0]
         color = [1, 1, 0]
         self._path_data.addLine(start, end, radius=0.1)
-        vis.updatePolyData(self._path_data.getPolyData(), "path", 
+        vis.updatePolyData(self._path_data.getPolyData(), "path",
                            color=color)
 
     def clear_path(self):
@@ -245,7 +247,10 @@ class CarObstacleEnv(object):
         self._path_data = DebugData()
 
     def create_target(self):
-        self._target_pos = self.generate_random_position()
+        target_robot = Robot()  # Target object
+        target_robot.attach_sensor(RaySensor())
+        self._target_pos = self.init_robot_position(target_robot)
+
         data = DebugData()
         center = [self._target_pos[0], self._target_pos[1], 1]
         axis = [0, 0, 1]  # Upright cylinder.
@@ -331,8 +336,12 @@ class CarObstacleEnv(object):
         while True:
             robot.x, robot.y = self.generate_random_position()
             robot.theta = np.random.uniform(0, 2 * np.pi)
-            if min(robot.sensor.distances) >= 0.30:
-                return
+            # print "============================="
+            # print robot.sensor.distances
+            if min(robot.sensor.distances) >= 0.3:
+                # print "success"
+                return (robot.x, robot.y)
+            # print "Fail"
 
     def reset_robot(self):
         self._robot[0].set_target(self._target_pos)

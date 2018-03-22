@@ -205,13 +205,17 @@ class Robot(MovingObject):
         prev_xy = self._state[0], self._state[1]
         super(Robot, self).move(action)
 
-        if self._sensor.has_collided() or self.at_target():
-        # if self._sensor.has_collided():
+        is_at_target = False
+        if self.at_target():
+            is_at_target = True
+            done = True
+        elif self._sensor.has_collided():
             done = True
         else:
             done = False
 
-        return self._get_state(), self._get_reward(prev_xy), done, prev_xy
+        info = {"prevxy": prev_xy, "is_at_target": is_at_target}
+        return self._get_state(), self._get_reward(prev_xy), done, info
 
 
     def set_target(self, target):
@@ -229,7 +233,7 @@ class Robot(MovingObject):
         new_dy = self._target[1] - self._state[1]
         new_distance = np.sqrt(new_dx ** 2 + new_dy ** 2)
         if self._sensor.has_collided():
-            return -40
+            return -15
         elif self.at_target():
             return 15
         else:
@@ -237,6 +241,9 @@ class Robot(MovingObject):
             # angle_distance = -abs(self._angle_to_destination()) / 4
             # obstacle_ahead = self._sensor.distances[8] - 1
             # delta_distance = -new_distance
+            # print delta_distance
+            if delta_distance < 0:
+                delta_distance = 2 * delta_distance
             return delta_distance
 
         # if self._sensor.has_collided():
@@ -317,7 +324,7 @@ class RaySensor(object):
 
     """Ray sensor."""
 
-    def __init__(self, num_rays=10, radius=40, min_angle=-45, max_angle=45):
+    def __init__(self, num_rays=30, radius=40, min_angle=-180, max_angle=180):
         """Constructs a RaySensor.
 
         Args:
@@ -343,8 +350,11 @@ class RaySensor(object):
     @property
     def distances(self):
         """Array of distances measured by each ray."""
+        # print "_-------------------------distances---------------"
+        # print self._distances
+        # print "--------------------------------------------------"
         normalized_distances = [
-            self._distances[i] / self._radius if self._hit[i] else 1.0
+            self._distances[i] if self._hit[i] else 1.0
             for i in range(self._num_rays)
         ]
         return normalized_distances
