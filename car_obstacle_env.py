@@ -49,7 +49,7 @@ class CarObstacleEnv(object):
 
         # init agent
         self._agent = DuelingAgent(n_actions=len(self.actions), n_features=30+3,
-            lr=0.001, gamma=0.95, e_start=0.5, e_end=0.05, 
+            lr=0.0005, gamma=0.9, e_start=0.5, e_end=0.05,
             e_decay=5e-6, replace_iter=200, memory_size=50000, batch_size=32)
 
         self.rewards = []
@@ -97,7 +97,7 @@ class CarObstacleEnv(object):
                     self.is_test = True
 
                 if self._i_eps > self.start_render:
-                    np.asarray(self.rewards).dump("rewards.dat")
+                    np.asarray(self.test_results).dump("test_results.dat")
                     self._agent.save_param()
                     self.plot.plot_success(eps=self.test_epss, success=self.test_results, normalization=self.test_total_count)
                     self._render = True
